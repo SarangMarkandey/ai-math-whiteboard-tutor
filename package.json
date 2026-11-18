@@ -1,0 +1,45 @@
+{
+  "name": "braynix-whiteboard",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "db:migrate": "node scripts/database.mjs",
+    "db:prune": "node scripts/prune.mjs",
+    "package:source": "node scripts/package-source.mjs",
+    "test:production": "node scripts/production-smoke.mjs",
+    "db:check": "node scripts/check-database.mjs"
+  },
+  "dependencies": {
+    "@next/env": "16.4.6",
+    "katex": "0.19.1",
+    "next": "16.4.6",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "@electric-sql/pglite-socket": "0.2.19",
+    "@playwright/test": "1.65.1",
+    "@tailwindcss/postcss": "4.3.5",
+    "@types/katex": "0.16.8",
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.5",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  },
+  "type": "module"
+}

@@ -1,0 +1,8 @@
+.env* export-ignore
+node_modules/ export-ignore
+.next/ export-ignore
+.cache/ export-ignore
+test-results/ export-ignore
+playwright-report/ export-ignore
+coverage/ export-ignore
+.env.example -export-ignore

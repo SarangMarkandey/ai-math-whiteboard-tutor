@@ -1,0 +1,61 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Next.js and generated build output
+.next/
+.vercel/
+out/
+dist/
+build/
+next-env.d.ts
+*.tsbuildinfo
+
+# Environment files and local credentials (commit placeholders only)
+.env*
+*.env
+*.env.*
+!.env.example
+.npmrc
+.aws/
+.ssh/
+.credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Generated lessons, speech, local databases and backups
+.cache/
+.local-data/
+pgdata/
+*.dump
+*.backup
+*.sql.gz
+
+# Test reports, browser captures and coverage (keep tests/fixtures)
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Logs and temporary files
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tmp
+*.swp
+*.swo
+*~
+
+# Machine-specific editor, OS and assistant configuration
+.idea/
+.vscode/
+.agents/
+.codex/
+.DS_Store
+Thumbs.db
