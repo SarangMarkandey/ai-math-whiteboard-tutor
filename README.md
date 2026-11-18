@@ -4,7 +4,7 @@ An AI-powered mathematics whiteboard tutor for beginners who want to understand 
 
 ## Live demo
 
-**[Open the live application](https://ai-math-whiteboard-tutor.vercel.app/)** · [Source on GitHub](https://github.com/SarangMarkandey/ai-math-whiteboard-tutor)
+**[Open the live application](https://ai-math-whiteboard-tutor.vercel.app/)** ·
 
 Use **Try saved example** to explore the player without generating content. Live lessons and follow-up answers depend on provider availability and free-tier allowance.
 
