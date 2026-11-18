@@ -61,10 +61,6 @@ export default function TopicComposer({
         Supported: linear equations in the form ax + b = c, including negative
         and fractional values. Free Plan only.
       </p>
-      {process.env.NODE_ENV === 'production' && <p className="scope-note">
-        Free demo: up to two new lessons and eight questions per session each day.
-        Shared daily limits apply; the saved example remains available.
-      </p>}
       <div className="example-prompts">
         {examples.map((t, i) => (
           <button disabled={!ready} key={t} onClick={() => onTopic(t)}>

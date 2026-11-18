@@ -1,71 +1,144 @@
-# Deploy manually: existing Vercel Hobby, Neon Free, Groq Free
+# Production setup and operations
 
-No infrastructure, account, billing change, deployment or submission is performed automatically.
+The deployment target is Vercel Hobby with Neon Free PostgreSQL and Groq Free Plan. The [main README](../README.md) covers the learner flow and supported mathematics.
 
-## Required setup
+## Environment configuration
 
-1. Use **Node 24 LTS** (`.nvmrc`, `engines.node=24.x`) and run `npm ci`. Vercel [supports Node 24](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions).
-2. In the existing Neon **Free** project, select the intended database and copy its **pooled** connection URL to server-only `DATABASE_URL`. Preserve TLS (`sslmode=verify-full`). The app uses `pg`, at most two connections per function instance, short transactions and idle connection cleanup; no connection is checked out during a provider call. See [Neon pooling](https://neon.com/docs/connect/connection-pooling).
-3. Set these six server-only variables in `.env.local` and later in Vercel's intended environment:
+Use Node **24.x**, matching `package.json`; [.nvmrc](../.nvmrc) pins the local version. Install with `npm ci`. Configure the following in `.env.local` for local PostgreSQL use and in the Vercel Production environment for deployment:
 
 ```dotenv
 DATABASE_URL=postgresql://USER:PASSWORD@HOST-pooler.REGION.aws.neon.tech/DATABASE?sslmode=verify-full
-DEMO_SESSION_SECRET=at_least_32_random_characters
-GROQ_API_KEY=your_existing_free_plan_key
+DEMO_SESSION_SECRET=replace_with_a_random_secret_of_at_least_32_characters
+GROQ_API_KEY=your_groq_api_key
 GROQ_LESSON_MODEL=openai/gpt-oss-20b
 GROQ_TTS_MODEL=canopylabs/orpheus-v1-english
 GROQ_TTS_VOICE=hannah
 ```
 
-Generate the session secret privately with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Never prefix these variables with `NEXT_PUBLIC_`, commit real values, or expose them in screenshots/logs. Restart after configuration changes.
+All six are server-only; never use `NEXT_PUBLIC_` for them. Generate the session secret privately with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Restart local servers after changes; deployed environment changes require a new deployment.
 
-4. Review `migrations/001_demo_storage.sql`, then explicitly run `npm run db:migrate` against the intended database. It records a checksum; reruns are idempotent and changed applied migrations are rejected. Existing unrelated tables are preserved. Routes/builds never create or alter schemas. Database errors are sanitized; inspect permissions/schema using the console if migration fails rather than deleting tables blindly.
-5. Run `npm run typecheck`, `npm run test`, `npm run build`, then `npm start`. Open `/api/health`: configured storage should return `ready: true`, `storage: postgresql`. This checks schema/configuration presence, not Groq account access or balance. Saved playback needs no database/key. Production `/dev/voice` is unavailable and preview generation returns 403.
-6. Optionally run `npm run test:production` after building. It uses a temporary embedded PostgreSQL server over TCP, the real `pg` driver, placeholder keys and an outbound-fetch blocker. It never contacts Neon/Groq. It checks migration, production requests, sessions/quotas, clip delivery and state across application restarts. This cannot certify Neon TLS/network access or multi-backend PostgreSQL concurrency.
+Use the intended Neon database's pooled connection URL with certificate verification. The `pg` pool has at most two connections per application instance; transactions release clients before provider calls. See [Neon pooling](https://neon.com/docs/connect/connection-pooling). Leave `DATABASE_URL` unset only for filesystem-based development; those local caches are not imported into PostgreSQL automatically.
 
-## Vercel steps (owner performs)
+## Database checks and migrations
 
-1. Publish the reviewed source to your own GitHub repository with committed `package-lock.json`. This workspace's `.git` may not be a usable checkout; initialize/connect your source repository if needed. Never publish `.env.local`, other secret files, dependencies, builds or runtime caches.
-2. Import that repository in the existing **Hobby** account as a Next.js project. Set Node **24.x**, install `npm ci`, build `npm run build`, default Next.js output. Do not enable paid add-ons, billing or upgrades.
-3. Add the six variables above to Production. Apply the reviewed migration to that exact database **before** deploying. Migrations are not a build step. Preview deployments need explicit separate settings; avoid giving untrusted previews production credentials.
-4. Deploy through the normal Vercel dashboard. Check `/api/health`, the saved example, and public access without a reviewer account. Check deployment-protection settings if reviewers cannot open the URL.
-5. Inspect Groq usage yourself, then explicitly generate **one** supported equation. Pause during an operation, ask why it works, resume from the saved position, seek backward, finish and try practice. Reload during preparation and explicitly resume; completed clips must not regenerate.
-6. Monitor Neon/Vercel/Groq usage and prune expired data. Keep the saved example available when free limits are reached. Review public/source links before submitting; no submission is automatic.
+Review [the SQL migration](../migrations/001_demo_storage.sql), confirm the target database, then run:
 
-## Source packaging
+```sh
+npm run db:check
+npm run db:migrate
+```
 
-`.gitignore`, `.vercelignore`, and `.gitattributes` exclude secret environment files, `node_modules`, `.next`, runtime caches and reports. To create an independent allowlisted source directory:
+`db:check` performs a read-only connection/schema check. `db:migrate` explicitly applies the migration in a transaction and records a checksum. Reruns are idempotent; modified applied migrations are rejected. Migrations do **not** run during application startup or build. Existing unrelated tables are preserved.
+
+The original migration includes `tutor_usage` and `tutor_access`; request handlers no longer use them for quotas or admission. Keep applied migration files unchanged. No counter reset is required to generate lessons.
+
+## Vercel deployment
+
+1. Connect [the source repository](https://github.com/SarangMarkandey/ai-math-whiteboard-tutor) to a Vercel Hobby project using the Next.js preset.
+2. Select Node **24.x**, install command `npm ci`, build command `npm run build`, and the default Next.js output settings. Node support is documented in [Vercel's runtime reference](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions).
+3. Set the server environment variables above for Production. Apply the reviewed migration to that exact database before serving live requests. Configure Preview environments separately if live generation should work there.
+4. Deploy and open `/api/health`, then the homepage. Check Vercel deployment-protection settings so reviewers can open the public demo without a Vercel account.
+5. Review Groq usage and explicitly generate a supported equation. Check preparation, narration, a paused contextual question, resume, backward seeking and practice. Reload during preparation to check persisted resume behaviour.
+
+The submitted demo URL is [ai-math-whiteboard-tutor.vercel.app](https://ai-math-whiteboard-tutor.vercel.app/). Public access, deployed-version parity, current provider permissions and end-to-end hosted behaviour require a manual release check.
+
+## Health checks and verification
+
+`GET /api/health` reports `ready: true` and `storage: postgresql` when the production configuration/schema checks succeed. It checks provider-key presence, not whether Groq accepts that key, model, voice or remaining allowance. Saved playback does not depend on this endpoint succeeding. Production voice-preview generation is disabled; `/dev/voice` is unavailable.
+
+Local production verification:
+
+```sh
+npm run build
+npm run typecheck
+npm run test
+npm start
+```
+
+Open [localhost:3000](http://localhost:3000) and `/api/health`. A separate, no-provider smoke check is available after building:
+
+```sh
+npm run test:production
+```
+
+It uses temporary embedded PostgreSQL over TCP, the real `pg` driver, fixture audio, fake credentials and an outbound-provider blocker. It tests migrations, persistence across application restart, clip delivery and production guards. It does not verify Neon TLS/network access or multi-backend PostgreSQL behaviour.
+
+For production browser checks, install Chromium once with `npx playwright install chromium`, ensure port 3210 is free, and run:
+
+```sh
+PLAYWRIGHT_PRODUCTION=1 npm run test:e2e -- tests/browser/entry.spec.ts tests/browser/journey.spec.ts tests/browser/followup.spec.ts tests/browser/live.spec.ts tests/browser/clips.spec.ts tests/browser/preparation-scroll.spec.ts tests/browser/rational.spec.ts
+```
+
+These browser tests use mocked AI responses and local audio. The development-only preview test is excluded from this production command.
+
+## Request pacing, leases and quotas
+
+There are **no application-imposed daily or per-session generation quotas**, lesson-admission checks or global one-operation cap. Provider account/model limits still apply; see [Groq rate-limit documentation](https://console.groq.com/docs/rate-limits). A provider 429 or exhausted-allowance response is not an app daily allowance.
+
+- PostgreSQL claims use a **90-second lease per operation**. Duplicate active requests are rejected; completed claims can reuse saved results. Expired writers cannot overwrite newer work.
+- Claim/capacity updates use short serialized database transactions. Distinct operations may coexist after rate pacing permits them; there is no worker queue.
+- Shared pacing is at least **7 seconds**; provider rate-limit headers can extend waiting across instances. Provider calls have bounded 20–25-second timeouts, and route limits are 60 seconds for provider stages and 30 seconds for clips/health. Check the actual project's compute settings against [Vercel's current function limits](https://vercel.com/docs/functions/limitations).
+- A failed stage preserves successful work. Retrying is explicit; ambiguous failures may already have consumed provider allowance. External API execution and database commits cannot provide an exactly-once guarantee.
+- Signed anonymous cookies scope follow-up response caches. They expire after 24 hours, use HttpOnly and SameSite=Lax, and are Secure in production. They are not strong identity verification.
+
+Free-service allowances and platform policies may change. Monitor the Vercel, Neon and Groq dashboards rather than assuming availability from application settings.
+
+## Audio storage and retention
+
+Audio is stored once as content-hashed PostgreSQL `bytea`. Lesson/status and speech-cache JSON contain references and measured durations instead of repeated base64 or an assembled lesson file. Production delivers individual WAV clips with byte-range support; public lesson JSON omits audio bytes.
+
+| Application storage safeguard | Value |
+| --- | --- |
+| Logical audio bytes | 100 MiB |
+| Lesson and speech-cache JSON | 20 MiB |
+| Stored lesson records | 100 |
+| Individual clip | 4,000,000 bytes |
+| Individual lesson JSON record | 1,000,000 bytes |
+| Lesson and speech-cache expiry | 7 days |
+
+The clip cap is below the non-streamed response limit documented by [Vercel](https://vercel.com/docs/functions/limitations). Check current platform limits before changing it. Indexes, TOAST, operation records and other database contents consume additional space beyond these logical caps. Generation stops at a cap rather than silently evicting active lessons.
+
+Reads do not extend expiry; successful preparation writes extend the lesson expiry. Expired entries stop being served, but physical removal requires:
+
+```sh
+npm run db:prune
+```
+
+Pruning removes expired lessons/cache entries, old operations and legacy usage/access rows, and audio no longer referenced by a lesson or speech cache. No scheduled pruner is configured. Monitor database size and run pruning as needed. Clearing development `.cache/lessons/` or `.cache/groq-voice-preview/` can make a later explicit request generate audio again.
+
+## Troubleshooting
+
+| Symptom | Check/action |
+| --- | --- |
+| Live routes unavailable | Check all required server settings, restart/redeploy after changes, run `db:check`, and apply the reviewed migration if missing. |
+| Database timeout, DNS or TLS failure | Use `db:check` diagnostics; inspect network/database availability. Connections allow 15 seconds. Keep `sslmode=verify-full`; do not disable certificate verification to bypass errors. |
+| Changed migration checksum or existing-table conflict | Review migration history/schema. Restore the applied migration and add a new migration for intended changes; do not drop existing tables blindly. |
+| Groq denies model/voice access | Confirm the configured key's project/organization permissions and any required Orpheus terms in the Groq console. The app does not switch models or voices on failure. |
+| Provider rate limit or exhausted allowance | Inspect actual dashboard usage, wait as instructed, then explicitly resume the failed stage. Saved playback remains available. |
+| Planning validation error | Use the field/rule feedback on explicit retry. The verified equation remains; no speech is generated for a rejected plan. |
+| Storage cap or expired lesson | Run `db:prune` for expired data. For an expired lesson, submit its topic again; regeneration may use provider allowance. |
+| Local build works, hosted behaviour differs | Confirm deployed source/version, environment scope, Node version, database schema and public access; local mocked tests cannot verify these. |
+
+The shared driver configuration preserves pg 8's strict verification when normalizing deprecated SSL aliases unless libpq compatibility is explicitly selected. See [pg SSL configuration](https://node-postgres.com/features/ssl) and [PostgreSQL verification modes](https://www.postgresql.org/docs/current/libpq-ssl.html). CLI error messages use fixed guidance and safe categories rather than printing credentials or raw driver responses.
+
+## Source review and optional packaging
+
+Keep `package-lock.json`, migrations, tests and intentional fixtures, the saved lesson/audio/timings, audio license/provenance, `.env.example`, and fixture-generation scripts with their input text.
+
+The repository's exclusion files have different purposes:
+
+| File | Effect |
+| --- | --- |
+| `.gitignore` | Prevents matching **untracked** files from normal Git staging. It does not untrack files already committed or erase history. |
+| `.vercelignore` | Filters Vercel CLI deployment uploads; it is not a Git tracking rule. Review [Vercel's ignore documentation](https://vercel.com/docs/deployments/vercel-ignore) for the deployment method used. |
+| `.gitattributes` | Its `export-ignore` rules exclude matching paths from `git archive`; they do not affect commits or replace either ignore file. |
+
+Review `git ls-files`, `git status --short` and the staged diff before publishing. Exclude real environment files, credentials, dependencies, builds, runtime caches, database dumps and test reports. If a credential was committed, removing its file does not remove it from history; handle exposure separately.
+
+An optional source copy outside the repository can be created with:
 
 ```sh
 npm run package:source -- /absolute/path/to/an/empty/source-directory
 ```
 
-The copy includes placeholder `.env.example`, source, migrations, docs, scripts and test fixtures. Inspect it before publishing. No GitHub push occurs automatically.
-
-## Storage and retention
-
-- Audio bytes are stored once as content-hashed PostgreSQL `bytea`. Lesson/status and speech-cache JSON contain clip references, measured durations and metadata, never repeated base64 or an assembled lesson WAV. Completed follow-up responses are persisted as bounded operation results; bounded browser conversation history remains untrusted input.
-- Logical audio cap **100 MiB**, lesson/speech JSON cap **20 MiB**, **100 lessons** maximum, **4,000,000 bytes** per clip. Caps stop generation instead of silently evicting active lessons. Indexes, TOAST, operations, usage, metadata and other applications consume additional space; monitor actual disk usage. Current [Neon Free pricing](https://neon.com/pricing) lists storage/compute allowances; your account's actual limits govern.
-- Lessons/speech cache expire after **7 days**; reads do not extend expiry. Successful preparation writes extend the lesson expiry. Run `npm run db:prune` explicitly to remove expired rows, old operations/usage/access, and audio with no lesson/cache reference. No cron or worker is provisioned. Expiry immediately stops serving content; physical retention depends on owner pruning. If storage fills, prune expired records; do not regenerate speech blindly.
-
-## Anonymous access, quotas and leases
-
-The signed HttpOnly, SameSite=Lax cookie expires after 24 hours and is Secure in production. It is a small-demo mechanism, **not strong identity**; clearing cookies can obtain another session. Shared limits remain authoritative.
-
-UTC daily admission: **2 new topics/session**, **6 shared**; **8 follow-ups/session**, **30 shared**; **64 preparation/question claims/session**, **160 shared**. Failed or ambiguous claims count; completed operation cache hits do not. A session/topic/settings admission is unique during retention. These are conservative application caps, not promises about available Groq credits.
-
-All claim/quota/capacity updates serialize on one database control row. One active provider-stage lease is allowed globally, for **90 seconds**. Storage writes verify lease ownership/expiry, preventing stale owners overwriting newer work. Completed stages/clips survive requests and restarts. Expired/failed calls require an explicit retry. A provider timeout, lost response or database failure can still consume quota: exactly-once external API execution cannot be guaranteed.
-
-Shared spacing is at least **7 seconds**; account rate-limit headers extend waiting across instances. The next eligible time is persisted and returned to the browser. Account limits vary and other applications can consume quota. Quota/wait errors stop orchestration; no automatic retry loop exists. The owner can inspect actual usage in Groq's dashboard without extra API permissions.
-
-## Vercel request bounds and audio
-
-Groq requests timeout after 20–25 seconds; provider-stage routes allow **60 seconds**, clip/health routes **30 seconds**. Current [Vercel limits](https://vercel.com/docs/functions/limitations) list a 300-second Hobby Fluid Compute maximum and a **4.5 MB** non-streamed request/response cap. Check the project's actual compute settings. Each stage persists before responding; no detached background work is assumed.
-
-New manifests reference individual clips below 4 MB. Clip routes support byte ranges. No production endpoint returns a complete lesson WAV or audio in lesson JSON. Actual clip position plus the measured clip start drives the global board time. Metadata/transition buffering freezes the board; pause during buffering prevents auto-resume. Within-beat choreography remains estimated, not word alignment. Saved audio remains separate; no Flite fallback is used after provider failure.
-
-## Migration troubleshooting
-
-Run `npm run db:check` for a read-only connection/schema check; it makes no schema changes. Connection attempts allow 15 seconds for a sleeping Neon compute or network setup. `db:migrate` distinguishes connection failures from SQL/migration failures and prints only allowlisted error categories/codes and fixed guidance, never raw connection strings, driver messages or SQL details. DNS/network, timeout, certificate, authentication, privileges and checksum failures have separate instructions.
-
-Use explicit `sslmode=verify-full`. The shared configuration preserves pg 8's existing strict certificate/hostname verification when normalizing deprecated `require`/`prefer`/`verify-ca` aliases (unless libpq compatibility was explicitly requested). This avoids the driver's future-semantics warning without disabling TLS checks; see [pg SSL configuration](https://node-postgres.com/features/ssl) and [PostgreSQL verification modes](https://www.postgresql.org/docs/current/libpq-ssl.html). That warning alone does not identify the migration failure. Do not use `rejectUnauthorized: false` as a workaround. If `db:check` succeeds, explicitly rerun `npm run db:migrate`; if it fails, follow its sanitized diagnostic before retrying.
+The script copies an explicit allowlist, including current source, tests, fixtures, documentation and placeholder `.env.example`. Within copied directories it skips `.env*` files except `.env.example`, dependency/build/cache directories and symlinks. It does not apply all Git ignore rules and may include untracked source and an existing generated `next-env.d.ts`; this is not equivalent to a committed Git snapshot. Inspect the output before sharing it.

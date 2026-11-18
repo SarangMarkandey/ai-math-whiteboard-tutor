@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { unsupportedNumberWords } from "./teaching-contract";
 import {
   boardAt,
   sceneAt,
@@ -109,13 +110,7 @@ export function validateAnswer(
   context: ReturnType<typeof trustedContext>,
 ) {
   const a = answerSchema.parse(raw);
-  const prose = a.text.replace(/\bone side\b/gi, "side");
-  if (
-    /[<>\\\d]/.test(prose) ||
-    /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|half|quarter)\b/i.test(
-      prose,
-    )
-  )
+  if (/[<>\\\d]/.test(a.text) || unsupportedNumberWords(a.text))
     throw new Error("Use verified fact references for numerical claims");
   const text = a.text.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     if (!Object.hasOwn(context.facts, key)) throw new Error("Unknown mathematical fact");

@@ -1,4 +1,5 @@
 "use client";
+import { NARRATION_LIMIT } from "../domain/teaching-contract";
 import { useRef, useState } from "react";
 const initial =
   "Subtract three from both sides. Doing the same operation on both sides keeps the equation balanced.";
@@ -92,12 +93,12 @@ export default function VoicePreview() {
       <label htmlFor="preview-text">Exact narration to send</label>
       <textarea
         id="preview-text"
-        maxLength={179}
+        maxLength={NARRATION_LIMIT}
         value={text}
         disabled={busy}
         onChange={(e) => setText(e.target.value)}
       />
-      <p>{text.length} / 179 characters · One short teaching beat</p>
+      <p>{text.length} / {NARRATION_LIMIT} characters · One short teaching beat</p>
       <p>
         Model: {config?.model ?? "Loading configuration…"} · Voice:{" "}
         {config?.voice ?? "Loading…"}

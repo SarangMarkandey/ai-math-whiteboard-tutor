@@ -1,10 +1,12 @@
+import { checkCoefficientBounds, COEFFICIENT_SCOPE } from './linear-input';
+import { explanationSchema, objectiveSchema, outlineItemSchema } from './teaching-contract';
+import { spoken, spokenCoefficient, narrationText } from './narration';
 import { signedTerm, coefficient } from "./format";
 import { z } from "zod";
 import {
   equationSchema,
   rationalSchema,
-  parseRational,
-  rational as r,
+  normalizeEquation,
   solve,
   equal,
   negate,
@@ -38,91 +40,16 @@ export const tex = (v: Rational) =>
   v.d === "1" ? v.n : `\\frac{${v.n}}{${v.d}}`;
 export const equationText = (e: Equation) =>
   `${rationalText(e.a)}x ${BigInt(e.b.n) < 0n ? "-" : "+"} ${rationalText(BigInt(e.b.n) < 0n ? negate(e.b) : e.b)} = ${rationalText(e.c)}`;
-const words = [
-  "zero",
-  "one",
-  "two",
-  "three",
-  "four",
-  "five",
-  "six",
-  "seven",
-  "eight",
-  "nine",
-  "ten",
-  "eleven",
-  "twelve",
-  "thirteen",
-  "fourteen",
-  "fifteen",
-  "sixteen",
-  "seventeen",
-  "eighteen",
-  "nineteen",
-];
-function intSpeech(s: string): string {
-  const n = Number(s);
-  if (n < 0) return `negative ${intSpeech(String(-n))}`;
-  if (n < 20) return words[n];
-  if (n < 100)
-    return (
-      [
-        "",
-        "",
-        "twenty",
-        "thirty",
-        "forty",
-        "fifty",
-        "sixty",
-        "seventy",
-        "eighty",
-        "ninety",
-      ][Math.floor(n / 10)] + (n % 10 ? ` ${words[n % 10]}` : "")
-    );
-  return s;
-}
-export const spoken = (v: Rational) =>
-  v.d === "1" ? intSpeech(v.n) : `${intSpeech(v.n)} over ${intSpeech(v.d)}`;
+export { spoken } from './narration';
+export { specificEquation } from './linear-input';
 export function boundedEquation(input: unknown) {
-  const raw = equationSchema.parse(input);
-  const e: Equation = {
-    a: r(BigInt(raw.a.n), BigInt(raw.a.d)),
-    b: r(BigInt(raw.b.n), BigInt(raw.b.d)),
-    c: r(BigInt(raw.c.n), BigInt(raw.c.d)),
-  };
-  for (const v of Object.values(e))
-    if (Math.abs(Number(v.n)) > 99 || Math.abs(Number(v.d)) > 12)
-      throw new Error(
-        "Use coefficients up to ninety-nine and denominators up to twelve.",
-      );
+  const e = checkCoefficientBounds(normalizeEquation(equationSchema.parse(input)));
   const result = solve(e);
-  if (result.kind !== "unique")
-    throw new Error(
-      result.kind === "none"
-        ? "This equation has no solution. Unique-solution lessons are supported first."
-        : "Every x satisfies this equation. Unique-solution lessons are supported first.",
-    );
+  if (result.kind !== 'unique')
+    throw new Error(result.kind === 'none'
+      ? 'This equation has no solution. Unique-solution lessons are supported first.'
+      : 'Every x satisfies this equation. Unique-solution lessons are supported first.');
   return { e, result };
-}
-export function specificEquation(topic: string): Equation | null {
-  const s = topic.replaceAll("−", "-").replaceAll("×", "*");
-  const m =
-    /(-?\d+(?:\/\d+)?|-)??\s*\*?\s*x\s*([+-])\s*(\d+(?:\/\d+)?)\s*=\s*(-?\d+(?:\/\d+)?)(?![\d/a-z]|\.\d)/i.exec(
-      s,
-    );
-  if (!m) return null;
-  if (
-    /[\d=^*/.+-]|\bx\b/i.test(s.slice(0, m.index)) ||
-    /[\d=^*/+-]|\bx\b/i.test(s.slice(m.index + m[0].length))
-  )
-    return null;
-  try {
-    const a = parseRational(m[1] === "-" ? "-1" : m[1] || "1"),
-      b = parseRational(m[3]);
-    return { a, b: m[2] === "-" ? negate(b) : b, c: parseRational(m[4]) };
-  } catch {
-    return null;
-  }
 }
 export const interpretationSchema = z
   .object({
@@ -131,26 +58,10 @@ export const interpretationSchema = z
     equation: equationSchema,
   })
   .strict();
-const explanation = z
-  .string()
-  .min(4)
-  .max(90)
-  .refine(
-    (t) =>
-      !/[\d<>\\=\[\]]/.test(t) &&
-      !new RegExp(
-        `\\b(${words.join("|")}|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|half|quarter)\\b`,
-        "i",
-      ).test(t) &&
-      !/(only (the )?(left|right)|different operations|break equality|ignore equality)/i.test(
-        t,
-      ),
-    "Numerical claims belong to verified facts, not prose",
-  );
 export const teachingSchema = z
   .object({
-    objective: z.string().min(10).max(140),
-    outline: z.array(z.string().min(3).max(90)).min(3).max(6),
+    objective: objectiveSchema,
+    outline: z.array(outlineItemSchema).min(3).max(6),
     equation: equationSchema,
     solution: rationalSchema,
     beats: z
@@ -159,7 +70,7 @@ export const teachingSchema = z
           .object({
             id: z.string().regex(/^[a-z][a-z0-9-]{0,35}$/),
             role: z.enum(roles),
-            explanation,
+            explanation: explanationSchema,
             visual: z.enum(["reveal", "highlight", "draw"]),
           })
           .strict(),
@@ -177,25 +88,24 @@ export const teachingSchema = z
 export type Teaching = z.infer<typeof teachingSchema>;
 /** Transport contract: prose only plus a small practice problem. Layout and main maths are code-owned. */
 export const narrationResponseSchema = z.object({
-  objective: z.string().min(10).max(140),
-  outline: z.array(z.string().min(3).max(90)).min(3).max(6),
+  objective: objectiveSchema,
+  outline: z.array(outlineItemSchema).min(3).max(6),
   explanations: z.object(
-    Object.fromEntries(roles.map(role => [role, explanation])) as
-      Record<typeof roles[number], typeof explanation>,
+    Object.fromEntries(roles.map(role => [role, explanationSchema])) as
+      Record<typeof roles[number], typeof explanationSchema>,
   ).strict(),
-  practice: z.object({
-    a: z.number().int().min(-20).max(20).refine(value => value !== 0),
-    b: z.number().int().min(-99).max(99),
-    c: z.number().int().min(-99).max(99),
-  }).strict(),
+  practice: equationSchema.superRefine((equation,ctx) => {
+    const e = normalizeEquation(equation);
+    if (BigInt(e.a.n) === 0n) ctx.addIssue({code:'custom',path:['a'],message:'Use a nonzero practice coefficient.'});
+    try { checkCoefficientBounds(e); } catch { ctx.addIssue({code:'custom',message:COEFFICIENT_SCOPE}); }
+  }),
+
 }).strict();
 
 export function completeNarrationResponse(input: unknown, equation: Equation): Teaching {
   const wire = narrationResponseSchema.parse(input);
   const main = boundedEquation(equation);
-  const practice = boundedEquation({
-    a: r(wire.practice.a), b: r(wire.practice.b), c: r(wire.practice.c),
-  });
+  const practice = boundedEquation(wire.practice);
   return teachingSchema.parse({
     objective: wire.objective,
     outline: wire.outline,
@@ -239,9 +149,7 @@ export function compileTeaching(
       "Teaching beats must follow the verified operation sequence",
     );
   const a = tex(e.a),
-    b = tex(e.b),
     c = tex(e.c),
-    op = tex(negate(e.b)),
     remaining = result.steps[1].c,
     x = tex(result.solution),
     product = multiply(e.a, result.solution);
@@ -277,10 +185,10 @@ export function compileTeaching(
   actions[2].push({ target: "original-b", kind: "highlight", duration: 2 });
   actions[3].push({ target: "original-eq", kind: "highlight", duration: 2 });
   element(4, "operation-left", signedTerm(negate(e.b), true), 225, 145);
-  element(5, "operation-right", `+(${op})`, 510, 145);
+  element(5, "operation-right", signedTerm(negate(e.b), true), 510, 145);
   element(6, "cancel-b", "", 225, 65, "stroke", 95, 35);
   element(6, "cancel-op", "", 225, 120, "stroke", 95, 35);
-  element(7, "isolated-x", `${a}x`, 65, 220);
+  element(7, "isolated-x", coefficient(e.a, true), 65, 220);
   element(7, "isolated-eq", "=", 395, 220);
   element(7, "isolated-c", tex(remaining), 510, 220);
   element(8, "bar-left", "", 60, 238, "stroke", 125, 0);
@@ -338,23 +246,26 @@ export function compileTeaching(
       e.width = 125;
     }
   }
+  const absoluteConstant = BigInt(e.b.n) < 0n ? negate(e.b) : e.b;
+  const operation = BigInt(e.b.n) > 0n ? 'Subtract' : 'Add';
+  const from = operation === 'Subtract' ? 'from' : 'to';
   const fact = [
-    `Solve ${spoken(e.a)} times x plus ${spoken(e.b)} equals ${spoken(e.c)}.`,
-    `The unknown is x. Its coefficient is ${spoken(e.a)}.`,
+    'Let us solve the equation on the board.',
+    `The x term is ${spokenCoefficient(e.a)}.`,
     `The constant term is ${spoken(e.b)}.`,
-    `Both sides of the equation have the same value.`,
-    `Add ${spoken(negate(e.b))} on the left.`,
-    `Add ${spoken(negate(e.b))} on the right too.`,
-    `The constant and its opposite cancel to zero.`,
-    `We have ${spoken(e.a)} times x equals ${spoken(remaining)}.`,
+    `The right side is ${spoken(e.c)}. Both sides must stay equal.`,
+    `${operation} ${spoken(absoluteConstant)} ${from} the left side.`,
+    `${operation} ${spoken(absoluteConstant)} ${from} the right side too.`,
+    'The constant and its opposite cancel to zero.',
+    `Now ${spokenCoefficient(e.a)} equals ${spoken(remaining)}.`,
     `Divide the left side by ${spoken(e.a)}.`,
     `Divide the right side by ${spoken(e.a)} too.`,
-    `The coefficient divided by itself is one.`,
+    'The coefficient divided by itself is one.',
     `So x equals ${spoken(result.solution)}.`,
-    `Substitute ${spoken(result.solution)} for x in the original equation.`,
+    `Replace x with ${spoken(result.solution)} in the original equation.`,
     `The multiplication gives ${spoken(product)}.`,
     `Both sides equal ${spoken(e.c)}. The solution is verified.`,
-    `Try the related practice equation below.`,
+    'Try the related practice equation below.',
   ];
   const scenes = t.beats.map((beat, i) => {
     const permitted =
@@ -365,11 +276,7 @@ export function compileTeaching(
           : "reveal";
     if (beat.visual !== permitted)
       throw new Error("Unsupported visual for this teaching beat");
-    const text = `${fact[i]} ${beat.explanation}`;
-    if (text.length > 179)
-      throw new Error(
-        "Teaching phrase exceeds the speech limit; shorten this beat",
-      );
+    const text = narrationText(fact[i], beat.explanation);
     return {
       id: beat.id,
       title: roles[i],

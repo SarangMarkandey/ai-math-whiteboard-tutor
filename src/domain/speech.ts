@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { NARRATION_LIMIT } from "./teaching-contract";
 import { type LessonPlan } from "./lesson";
 export const previewRequestSchema = z
   .object({
     text: z
       .string()
       .min(1)
-      .max(179)
+      .max(NARRATION_LIMIT)
       .refine((t) => !!t.trim(), "Enter a short teaching beat"),
   })
   .strict();

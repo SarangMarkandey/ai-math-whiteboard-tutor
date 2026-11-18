@@ -27,7 +27,7 @@ export async function POST(request:Request){
   if(persistent()){
    const session=await demoSession();
    const key='followup:'+createHash('sha256').update(JSON.stringify([1,process.env.GROQ_LESSON_MODEL||'openai/gpt-oss-20b',session,input])).digest('hex');
-   result=await new ProductionGate().execute(key,session,'followup',request.headers.get('x-explicit-retry')==='1',answer,true);
+   result=await new ProductionGate().execute(key,request.headers.get('x-explicit-retry')==='1',answer,true);
   }else result=await answer();
   const reply=followupResponse.parse(result);
   if(reply.lessonId!==input.lessonId||reply.contextId!==input.contextId||reply.stepId!==input.stepId||reply.position!==input.position)

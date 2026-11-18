@@ -19,7 +19,7 @@ export async function transaction<T>(db: DB, work: (c: PoolClient) => Promise<T>
   try {
     await c.query('BEGIN');
     await c.query("SET LOCAL TIME ZONE 'UTC'");
-    // This single row serializes quota admission, capacity checks and claims.
+    // This single row serializes capacity checks and duplicate-generation claims.
     await c.query('SELECT id FROM tutor_control WHERE id=1 FOR UPDATE');
     const result = await work(c);
     await c.query('COMMIT');

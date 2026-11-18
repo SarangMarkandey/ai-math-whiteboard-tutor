@@ -67,44 +67,51 @@ it('persists completed clips and stage across database close/reopen without dupl
   await clipCache.put(hit.entry);expect((await clipCache.get(hit.entry.key))?.speech).toEqual(speech);
  }finally{await server.pg.close();rmSync(directory,{recursive:true,force:true});}
 },30000);
-it('enforces per-session/shared allowances transactionally and prevents duplicate admission',async()=>{
+it('ignores exhausted legacy daily counters while preserving request pacing',async()=>{
  const {db,pg}=await testDatabase();try{
-  const gate=new ProductionGate(db);
-  await Promise.all([gate.admitLesson('session-a','a'),gate.admitLesson('session-a','a')]);
-  await gate.admitLesson('session-a','b');await expect(gate.admitLesson('session-a','c')).rejects.toMatchObject({code:'demo_quota'});
-  for(let i=0;i<4;i++)await gate.admitLesson('other-'+i,'lesson-'+i);
-  await expect(gate.admitLesson('last','lesson-last')).rejects.toMatchObject({code:'demo_quota'});
-  expect((await db.query("SELECT used FROM tutor_usage WHERE subject='shared' AND kind='lessons'")).rows[0].used).toBe(6);
+  for(const subject of ['shared','old-session'])for(const kind of ['lessons','questions','requests'])
+   await db.query('INSERT INTO tutor_usage(subject,kind,used) VALUES($1,$2,1000000)',[subject,kind]);
+  const gate=new ProductionGate(db),work=vi.fn(async()=>({ok:true}));
+  for(let i=0;i<10;i++){
+   await db.query("UPDATE tutor_control SET blocked_until=now()-interval '1 second'");
+   await gate.execute('new-request:'+i,false,work);
+  }
+  expect(work).toHaveBeenCalledTimes(10);
+  expect((await db.query('SELECT max(used) AS n FROM tutor_usage')).rows[0].n).toBe(1000000);
+  await expect(gate.execute('paced-request',false,work)).rejects.toMatchObject({code:'rate_limit'});
  }finally{await pg.close();}
 });
-it('prevents concurrent stages and never repeats a completed operation',async()=>{
+it('prevents duplicate stages while allowing distinct operations and caching completion',async()=>{
  const {db,pg}=await testDatabase();try{
   const gate=new ProductionGate(db);let release!:()=>void;let started!:()=>void;
   const entered=new Promise<void>(r=>{started=r;});const wait=new Promise<void>(r=>{release=r;});
   const work=vi.fn(async()=>{started();await wait;return {text:'mocked validated answer'};});
-  const active=gate.execute('followup:test','s','followup',false,work,true);await entered;
-  await expect(new ProductionGate(db).execute('followup:test','s','followup',false,work,true)).rejects.toMatchObject({code:'busy'});
+  const active=gate.execute('followup:test',false,work,true);await entered;
+  await expect(new ProductionGate(db).execute('followup:test',false,work,true)).rejects.toMatchObject({code:'busy'});
+  await db.query("UPDATE tutor_control SET blocked_until=now()-interval '1 second'");
+  const distinct=vi.fn(async()=>({ok:true}));
+  await gate.execute('another-operation',false,distinct);expect(distinct).toHaveBeenCalledTimes(1);
   release();await active;
-  expect(await new ProductionGate(db).execute('followup:test','s','followup',false,work,true)).toEqual({text:'mocked validated answer'});
+  expect(await new ProductionGate(db).execute('followup:test',false,work,true)).toEqual({text:'mocked validated answer'});
   expect(work).toHaveBeenCalledTimes(1);
  }finally{await pg.close();}
 });
 it('requires explicit retry after an expired lease or ambiguous provider failure',async()=>{
  const {db,pg}=await testDatabase();try{
   const gate=new ProductionGate(db),work=vi.fn(async()=>{throw new Error('mock timeout');});
-  await expect(gate.execute('stage:x','s','stage',false,work)).rejects.toThrow('mock timeout');
-  await expect(gate.execute('stage:x','s','stage',false,work)).rejects.toMatchObject({code:'ambiguous'});
+  await expect(gate.execute('stage:x',false,work)).rejects.toThrow('mock timeout');
+  await expect(gate.execute('stage:x',false,work)).rejects.toMatchObject({code:'ambiguous'});
   expect(work).toHaveBeenCalledTimes(1);
   await db.query("UPDATE tutor_control SET blocked_until=now()-interval '1 second'");
-  await gate.execute('stage:x','s','stage',true,async()=>undefined);
+  await gate.execute('stage:x',true,async()=>undefined);
   await db.query("INSERT INTO tutor_operations(key,owner,state,expires_at) VALUES('expired','00000000-0000-0000-0000-000000000000','active',now()-interval '1 second')");
-  await expect(gate.execute('expired','s','stage',false,work)).rejects.toMatchObject({code:'ambiguous'});
+  await expect(gate.execute('expired',false,work)).rejects.toMatchObject({code:'ambiguous'});
  }finally{await pg.close();}
 });
 it('fences an expired owner from persisting provider audio',async()=>{
  const {db,pg}=await testDatabase();try{
   const repo=new PostgresSpeechRepository(db),gate=new ProductionGate(db);
-  await expect(gate.execute('lease:test','s','stage',false,async()=>{
+  await expect(gate.execute('lease:test',false,async()=>{
    await db.query("UPDATE tutor_operations SET expires_at=now()-interval '1 second' WHERE key='lease:test'");
    await repo.put({key:cacheKey('Test.',config),identity:identity('Test.',config),speech,metadata:{},createdAt:new Date().toISOString()});
   })).rejects.toMatchObject({code:'lease_expired'});

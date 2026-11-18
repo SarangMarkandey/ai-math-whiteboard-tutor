@@ -1,4 +1,5 @@
 import 'server-only';
+import { NARRATION_LIMIT } from '../../domain/teaching-contract';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
@@ -29,7 +30,7 @@ async function saveBlob(c:PoolClient, base64:string) {
  if(!hit.rowCount){await capacity(c,bytes.length);await c.query('INSERT INTO tutor_blobs(key,audio) VALUES($1,$2)',[key,bytes]);}
  return key;
 }
-const storedClip=z.object({segmentId:z.string().max(80),text:z.string().max(179),blobKey:reference,speech:z.object({durationSeconds:z.number().positive(),format:z.literal('wav')})}).strict();
+const storedClip=z.object({segmentId:z.string().max(80),text:z.string().max(NARRATION_LIMIT),blobKey:reference,speech:z.object({durationSeconds:z.number().positive(),format:z.literal('wav')})}).strict();
 export class PostgresLessonRepository implements Repository<Job> {
  constructor(private db:DB=database()){}
  async get(id:string):Promise<Job|null>{

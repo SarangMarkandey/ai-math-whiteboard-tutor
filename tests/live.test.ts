@@ -238,7 +238,7 @@ function narrationWire(e = equation) {
  const t = teaching(e);
  return {objective:t.objective,outline:t.outline,
  explanations:Object.fromEntries(t.beats.map(b=>[b.role,b.explanation])),
- practice:{a:3,b:2,c:17}};
+ practice:{a:r(3),b:r(2),c:r(17)}};
 }
 it('requests a compact JSON narration payload and computes all mathematical answers locally',async()=>{
  const f=vi.fn(async()=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(narrationWire())}}]})));
@@ -261,7 +261,7 @@ it('compiles the reported negative-coefficient equation from narration-only prov
 it('rejects incomplete narration, zero practice coefficients and unexpected numerical claims',()=>{
  const missing=narrationWire();delete (missing.explanations as Record<string,string>).cancel;
  expect(()=>completeNarrationResponse(missing,equation)).toThrow();
- expect(()=>completeNarrationResponse({...narrationWire(),practice:{a:0,b:2,c:17}},equation)).toThrow();
+ expect(()=>completeNarrationResponse({...narrationWire(),practice:{a:r(0),b:r(2),c:r(17)}},equation)).toThrow();
  expect(()=>completeNarrationResponse({...narrationWire(),solution:r(99)},equation)).toThrow();
 });
 it('upgrades an exhausted old planning job on explicit resume while retaining its equation',async()=>{
@@ -272,7 +272,7 @@ it('upgrades an exhausted old planning job on explicit resume while retaining it
  j.stage='plan';j.equation=e;j.attempts=2;j.config.promptVersion=2;j.message='Schema rejected';
  await repo.put(j.id,j);
  const resumed=await service.advance(j.id);
- expect(resumed.stage).toBe('narration');expect(resumed.config.promptVersion).toBe(3);
+ expect(resumed.stage).toBe('narration');expect(resumed.config.promptVersion).toBe(4);
  expect(resumed.attempts).toBe(1);expect(resumed.equation).toEqual(e);
  expect(provider.mock.calls.map(c=>c[0])).toEqual(['plan']);
  expect(speaker.preview).not.toHaveBeenCalled();

@@ -1,4 +1,7 @@
 import "server-only";
+import { EXPLANATION_STYLE, LESSON_PIPELINE_VERSION, validationFeedback } from '../../domain/teaching-contract';
+import { parseEquationRequest } from '../../domain/linear-input';
+import { solve } from '../../domain/math';
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -32,7 +35,7 @@ export type Job = {
     lessonModel: string;
     ttsModel: string;
     voice: string;
-    promptVersion: 1 | 2 | 3;
+    promptVersion: 1 | 2 | 3 | typeof LESSON_PIPELINE_VERSION;
     level: "beginner";
   };
   stage:
@@ -60,14 +63,16 @@ export function lessonKey(topic: string, model: string, c: SpeechConfig) {
   return createHash("sha256")
     .update(
       JSON.stringify({
-        topic,
-        equation: specificEquation(topic),
+        request: (() => {
+          const parsed = parseEquationRequest(topic);
+          return parsed.kind === 'equation' ? {equation:parsed.equation,context:parsed.context} : {topic};
+        })(),
         model,
         tts: c.modelId,
         voice: c.voiceId,
         format: c.outputFormat,
         speechVersion: c.version,
-        prompt: 3,
+        prompt: LESSON_PIPELINE_VERSION,
         schema: 3,
         level: "beginner",
       }),
@@ -152,7 +157,7 @@ export class LessonService {
         lessonModel: this.lessonModel,
         ttsModel: this.config.modelId,
         voice: this.config.voiceId,
-        promptVersion: 3,
+        promptVersion: LESSON_PIPELINE_VERSION,
         level: "beginner",
       },
       stage: "interpret",
@@ -191,11 +196,17 @@ export class LessonService {
     job.retryAt = undefined;
     try {
       if (job.stage === "interpret") {
-        const specific = specificEquation(job.topic);
-        if (/[=]/.test(job.topic) && !specific) {
-          job.stage = "clarify";
-          job.message =
-            "Please write one equation in the form ax + b = c, such as 3x - 4 = 11. Nonlinear equations and expressions on both sides are not supported yet.";
+        const parsed = parseEquationRequest(job.topic);
+        const specific = parsed.kind === 'equation' ? parsed.equation : null;
+        if (parsed.kind === 'invalid') {
+          job.stage = 'clarify';
+          job.message = parsed.message;
+        } else if (specific && solve(specific).kind !== 'unique') {
+          job.stage = 'unsupported';
+          job.equation = specific;
+          job.message = solve(specific).kind === 'none'
+            ? 'This equation has no solution. Live lessons currently require one unique solution; no division by zero was attempted.'
+            : 'Every value of x satisfies this equation. Live lessons currently require one unique solution; no division by zero was attempted.';
         } else {
           const interpreted = interpretationSchema.parse(
             await this.ask("interpret", {
@@ -220,14 +231,15 @@ export class LessonService {
               throw new Error(
                 "The chosen example did not have a fractional solution. Retry interpretation explicitly.",
               );
+            job.config.promptVersion = LESSON_PIPELINE_VERSION;
             job.stage = "plan";
             job.attempts = 0;
           }
         }
       } else if (job.stage === "plan") {
         // Upgrade only unfinished old planning stages; retain verified interpretation.
-        if (job.config.promptVersion !== 3) {
-          job.config.promptVersion = 3;
+        if (job.config.promptVersion !== LESSON_PIPELINE_VERSION) {
+          job.config.promptVersion = LESSON_PIPELINE_VERSION;
           job.attempts = 0;
         }
         if (job.attempts >= 2)
@@ -241,8 +253,7 @@ export class LessonService {
           equation: verified.e,
           verifiedSteps: verified.result,
           roles,
-          requirements:
-            "Explanations must be qualitative, with no number words. Visual mapping: unknown/constant/equality/quotient highlight; cancel/divideLeft/divideRight draw; all others reveal.",
+          requirements: EXPLANATION_STYLE,
         });
         job.attempts++;
         job.plan = compileTeaching(raw, verified.e, job.id);
@@ -292,7 +303,7 @@ export class LessonService {
         e instanceof SpeechError
           ? e.message
           : e instanceof z.ZodError
-            ? "AI output failed validation. Your verified equation and earlier stages are retained. Retry this stage explicitly."
+            ? `AI output failed validation. Check: ${validationFeedback(e)} Earlier verified stages are retained; retry this stage explicitly.`
             : e instanceof Error
               ? e.message
               : "Generation failed";

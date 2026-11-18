@@ -1,153 +1,112 @@
 # Math Tutor
 
-An interactive mathematics whiteboard tutor for beginners who want to understand **why** algebraic steps work. Learners enter a topic or equation, watch a narrated visual explanation, ask questions about a paused step, and try a related practice problem.
+An AI-powered mathematics whiteboard tutor for beginners who want to understand why algebraic steps work. Enter a topic or equation, prepare a narrated lesson, watch progressive working, ask about a paused step, and practise a related problem.
 
-The initial scope is linear equations of the form **ax + b = c**. Live lessons and contextual explanations use Groq; exact arithmetic, mathematical verification, visual layout and playback are controlled by application code.
+## Live demo
 
-## Features
+**[Open the live application](https://ai-math-whiteboard-tutor.vercel.app/)** · [Source on GitHub](https://github.com/SarangMarkandey/ai-math-whiteboard-tutor)
 
-- Chat-first topic entry, example prompts and a separately labelled saved lesson.
-- Live explanations for new supported equations, including negative coefficients and fractional answers.
-- Progressive working: term reveals, matching operations on both sides, cancellation, division, substitution and verification. Earlier working remains visible.
-- Groq narration in short teaching beats, with measured clip durations and active captions.
-- Play, pause, resume, seek, restart, scene selection, mute and transcript access.
-- Contextual text answers grounded in the current verified equation and selected step, with optional temporary highlights. Returning restores the original lesson position.
-- Related practice with exact answer checking, a hint and retries.
-- Responsive board framing, collapsible mobile conversation, keyboard controls and reduced-motion support.
-- PostgreSQL persistence, resumable preparation, audio caching, database-backed leases and anonymous demo quotas for production.
+Use **Try saved example** to explore the player without generating content. Live lessons and follow-up answers depend on provider availability and free-tier allowance.
 
-## Live versus saved content
+## Features and supported mathematics
 
-| Capability | Behaviour |
+- Progressive whiteboard working: term reveals, matching operations on both sides, cancellation, division, substitution and verification.
+- Narrated teaching beats, captions, transcript, play/pause/resume, seeking, restart, scene navigation and mute.
+- Contextual text answers with optional temporary highlights, followed by a return to the original lesson position.
+- Related practice with exact answer checking, a hint and retry.
+- Responsive board framing, mobile conversation disclosure, keyboard controls and reduced-motion support.
+- Cached audio and resumable lesson preparation, with PostgreSQL storage in production.
+
+The live tutor handles **ax + b = c** generically, where `a`, `b` and `c` are signed integers or rational numbers and `a` is nonzero. Omitting a zero constant is supported (`2x = 8`). Examples include:
+
+| Request | Exact solution |
 | --- | --- |
-| Live lessons | Groq interprets a supported request and writes qualitative explanations. Code verifies the equation and builds the visual timeline. Groq Orpheus generates each narration clip. |
-| Saved example | `2x + 3 = 11`, with bundled offline Flite narration and balance/block illustrations. Works without API keys or a database. |
-| Follow-up answers | Explicitly requested text answers from the configured Groq lesson model. No automatic speech generation; optional highlights are static references, not operation demonstrations. |
-| Voice preview | Development-only at `/dev/voice`, limited to 179 characters. Disabled in production. |
+| `Help me solve -20x + 10 = 30.` | `x = -1` |
+| `1/2x + 3 = 7` | `x = 8` |
+| `3/4x - 1/2 = 1` | `x = 2` |
+| `-2/3x + 1/2 = 5/6` | `x = -1/2` |
 
-A failed live request never silently substitutes the saved example or its voice. Generation starts only after an explicit user action, never on page load, build, hot reload or test execution. No microphone or speech recognition is required.
+Fractional coefficients accept `1/2x`, `1/2*x`, `(1/2)x` and `x/2`. Signs, signed denominators, reasonable whitespace and the Unicode minus sign are normalized. Common request prefixes such as **Help me solve**, **Explain** and **Solve** are recognized; a general topic request can ask the AI to choose an example.
 
-## Quick start
+After reduction, coefficient numerator magnitude is limited to **99** and positive denominators to **12**. Input is limited to **400 characters**, with at most **30 digits** per integer token. Derived answers may have larger numerators or denominators.
 
-Use **Node.js 24 LTS**, pinned in [.nvmrc](.nvmrc), and npm. Dependencies are pinned in `package.json` and `package-lock.json`.
-
-```sh
-npm ci
-cp .env.example .env.local
-npm run dev
-```
-
-Open [localhost:3000](http://localhost:3000). To review without using any service quota, choose **Try saved example**. Its bundled narration requires no configuration.
-
-For live generation, replace the Groq placeholder in `.env.local` with your existing Free Plan key. Choose one storage mode:
-
-- **Local development:** remove/comment out `DATABASE_URL` and `DEMO_SESSION_SECRET` from `.env.local`. Plans and audio use ignored `.cache/` directories.
-- **PostgreSQL:** set a valid existing Neon connection URL and session secret, then review and explicitly apply the migration below. Production requires this mode.
-
-Restart the application after environment changes. Do not commit `.env.local` or use `NEXT_PUBLIC_` for server credentials.
-
-## Environment variables
-
-| Variable | Purpose |
-| --- | --- |
-| `GROQ_API_KEY` | Server-only key for the existing Groq Free Plan; required for live lessons and follow-ups. |
-| `GROQ_LESSON_MODEL` | Lesson/follow-up model. Defaults to `openai/gpt-oss-20b`. |
-| `GROQ_TTS_MODEL` | Speech model. Defaults to `canopylabs/orpheus-v1-english`. |
-| `GROQ_TTS_VOICE` | Speech voice. Defaults to `hannah`. |
-| `DATABASE_URL` | PostgreSQL URL; required in production, optional for local filesystem development. Use the intended Neon database's pooled URL with `sslmode=verify-full`. |
-| `DEMO_SESSION_SECRET` | At least 32 random characters, required when PostgreSQL is enabled. Signs anonymous demo session cookies. |
-
-Generate a session secret privately:
-
-```sh
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-Only placeholders belong in [.env.example](.env.example). Model access and Orpheus terms must be enabled on the existing Groq account; the application never switches models/voices, changes plans or enables billing automatically.
-
-## Database and production setup
-
-Review [migrations/001_demo_storage.sql](migrations/001_demo_storage.sql), confirm `DATABASE_URL` points to the intended database, then run:
-
-```sh
-npm run db:check
-npm run db:migrate
-npm run build
-npm start
-```
-
-`db:check` is read-only. `db:migrate` explicitly applies the versioned SQL and records its checksum; repeated runs are idempotent, and changing an applied migration is rejected. Startup and builds never alter schemas. Connection attempts allow 15 seconds and preserve certificate verification; CLI diagnostics omit credentials and raw driver messages.
-
-Open `/api/health` after starting: configured production storage should report `ready: true` and `storage: postgresql`. This checks configuration/schema availability, not Groq account permissions or balance. The saved example remains available when live configuration is missing.
-
-See [production setup and exact Vercel Hobby deployment steps](docs/production.md) for environment settings, migrations, retention, troubleshooting and reviewer access. No account creation, infrastructure provisioning, deployment or assignment submission is automatic.
+Decimals, variable denominators (`1/x`), powers, variables on both sides, multiple equations and general expressions such as `2(x + 3) = 8` are outside scope. Invalid or ambiguous input receives clarification or a scope message; explicit equations must parse completely. Zero-coefficient equations are classified as no solution or infinitely many solutions, but are not taught as narrated lessons. Failed generation never substitutes the saved example silently.
 
 ## Reviewer walkthrough
 
-1. Enter **Help me solve 5x + 7 = 32**, **Explain 3x - 4 = 11**, or **Show an equation with a fractional answer**.
-2. Click **Generate lesson** and watch the actual preparation stages and narration clip count. Free-tier preparation can take time; there is no promised completion time or fabricated percentage.
-3. When ready, press **Play**. Pause during a transformation or select a step under **Lesson options**.
-4. Choose **Ask about this step**, ask why the operation is valid, and read the contextual answer. **Resume lesson** restores the captured board, captions and playback position.
-5. Seek backward to see earlier working, finish the lesson, and attempt the practice problem.
-6. Click **Math Tutor** to return to the startup homepage. Playback stops; **Continue learning** appears when a stored preparation is available.
+1. Enter a supported equation or choose an example prompt, then click **Generate lesson**. The preparation panel shows the actual stage and narration clip count.
+2. Once preparation finishes, press **Play** to follow the visual working and captions.
+3. Pause during an operation, or select a step under **Lesson options**, then choose **Ask about this step**.
+4. Ask why the operation is valid. Read the contextual answer and choose **Resume lesson** to restore the captured position and clear temporary highlights.
+5. Seek backward to review earlier working, finish the lesson, and attempt the practice problem.
 
-**Resume preparation** retains completed stages/clips after a page or server restart. Errors preserve the learner's input and current lesson. Retry a failed or ambiguous provider call only explicitly after checking usage; a timeout may still consume allowance. Requests for a different equation offer **Start a new lesson** rather than replacing the current lesson silently.
+**Resume preparation** continues saved stages after interruption. **Math Tutor** returns to the homepage and stops playback. The separately labelled saved example teaches `2x + 3 = 11` with bundled narration; it is not a live AI response. No microphone is required.
 
-## Architecture
+## Local setup
 
-A single Next.js App Router application, with TypeScript strict checking and Node.js route handlers. React/SVG render the board, KaTeX typesets mathematics, Tailwind supplies styling, and Zod validates application/provider/storage boundaries. PostgreSQL uses the server-only `pg` driver.
+Use **Node.js 24 LTS** (the exact version is in [.nvmrc](.nvmrc)) and npm.
 
-```text
-src/app/                  App Router pages and bounded API requests
-src/components/           Learner workspace, conversation, board and controls
-src/domain/               Exact mathematics, lesson schemas and deterministic playback
-src/server/lessons/       Interpretation, verified planning and staged preparation
-src/server/speech/        Groq narration, WAV validation and clip caching
-src/server/followup/      Contextual answers and trusted mathematical grounding
-src/server/db/            PostgreSQL repositories, leases and quota enforcement
-src/content/              Saved lesson and measured fixture timings
-migrations/               Explicit versioned database schema
-scripts/                  Database tools, production smoke check and source packaging
-tests/                    Mocked unit, database and browser checks
+```sh
+npm ci
+npm run dev
 ```
 
-### Mathematics and generation
+Open [localhost:3000](http://localhost:3000) and select **Try saved example**. No environment file is needed for saved playback; contextual AI answers still require live configuration.
 
-The BigInt rational engine calculates transformations, exact solutions and substitution checks without floating-point equality or `eval`. It classifies zero-coefficient cases; live visual lessons currently require a unique solution. Supported live coefficients have numerators up to 99 and denominators up to 12 for readable layouts. Decimals, nonlinear equations, simultaneous equations and variables on both sides require clarification or an unsupported-scope response.
+For live generation, copy [.env.example](.env.example) to `.env.local` and replace the required placeholders:
 
-The server checks specific input coefficients against the interpreted equation. The planner returns bounded qualitative explanations for sixteen teaching beats and a related practice equation. Code owns exact numerical narration facts, solutions, practice hints, stable IDs, supported actions and geometry. Invalid outputs fail validation before speech. Plan validation has at most two explicit attempts; there is no unlimited repair loop or executable model output.
+```sh
+cp .env.example .env.local
+```
 
-Follow-up requests include bounded conversation history, selected step and timestamp. The server loads trusted lesson data and recomputes the mathematics; it does not trust coefficients or answers supplied by the browser. Pending replies are discarded when the lesson/context changes. Conversation display is page-local; PostgreSQL retains bounded completed answers for duplicate protection.
+Choose a storage mode before starting:
 
-### Audio synchronization
+- **Local development:** leave `DATABASE_URL` unset to use ignored `.cache/` files. A Groq key is required for generation and follow-ups.
+- **PostgreSQL:** configure `DATABASE_URL` and `DEMO_SESSION_SECRET`, review [the migration](migrations/001_demo_storage.sql), then run `npm run db:check` and `npm run db:migrate`. Production live routes require this mode.
 
-Groq speech returns audio without word/character alignment. Every teaching beat has its own WAV clip, measured from sample frames. The global board clock is **measured clip start + actual audio playback position**.
+Restart after changing environment variables. To serve a production build locally, run `npm run build` followed by `npm start`.
 
-The renderer reconstructs board state from the timestamp, including partial movements/strokes. Backward seeks restore earlier objects and remove later working. Clip buffering holds the position; pausing during buffering prevents automatic resume. Media listeners and animation frames are cleaned up. Within-beat visual offsets are **estimated choreography**, not verified word-level alignment.
+## Environment variables
 
-All clips are prepared before playback. New manifests contain individual clip URLs; production never returns a complete lesson WAV or base64 audio in lesson JSON. Clip endpoints support byte ranges and enforce a size cap below Vercel's response limit.
+All variables below are **server-only**. Keep real values out of Git and do not prefix them with `NEXT_PUBLIC_`.
 
-## Storage, quotas and free-service limits
-
-With PostgreSQL configured, preparation status, validated plans, measured clip references, manifests, completed follow-up responses, leases and usage counters persist across requests/restarts. Audio is stored once as content-hashed `bytea`, separately from JSON. Database claims prevent concurrent duplicate stages, and writes check lease ownership/expiry.
-
-| Demo limit | Cap |
+| Variable | Purpose |
 | --- | --- |
-| New lesson topic admissions | 2 per anonymous session/day; 6 shared/day |
-| Follow-up requests | 8 per session/day; 30 shared/day |
-| Preparation/question claims | 64 per session/day; 160 shared/day |
-| Concurrent provider stages | 1 shared, with a 90-second lease |
-| Stored audio / lesson-speech JSON | 100 MiB / 20 MiB |
-| Lessons / individual audio clip | 100 / 4,000,000 bytes |
-| Lesson and speech-cache expiry | 7 days |
+| `GROQ_API_KEY` | Required for live lesson interpretation, explanations, speech and follow-up answers. |
+| `GROQ_LESSON_MODEL` | Lesson/follow-up model; defaults to `openai/gpt-oss-20b`. |
+| `GROQ_TTS_MODEL` | Speech model; defaults to `canopylabs/orpheus-v1-english`. |
+| `GROQ_TTS_VOICE` | Speech voice; defaults to `hannah`. |
+| `DATABASE_URL` | PostgreSQL connection URL; optional in development, required for production live routes. |
+| `DEMO_SESSION_SECRET` | At least 32 random characters; required with PostgreSQL and used to sign anonymous follow-up cache sessions. |
 
-Daily limits use UTC. Anonymous signed cookies are not strong identity verification; clearing cookies can create another session, while shared caps still apply. Failed claims count. Provider headers can extend the shared waiting period; these application caps do not guarantee available Groq allowance. Inspect actual usage in the provider dashboard. Use only existing Vercel Hobby, Neon Free and Groq Free services.
+Generate the session secret privately with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Model/voice access must be available on the configured Groq account; there is no automatic provider or voice fallback.
 
-Run `npm run db:prune` explicitly to physically remove expired data and unreferenced audio. No cron or worker is provisioned. Storage caps stop preparation rather than silently evicting active lessons. Database indexes/metadata and other applications also consume space; monitor the actual Free project.
+## Architecture and AI responsibilities
 
-Without `DATABASE_URL`, development caches are `.cache/lessons/` and `.cache/groq-voice-preview/`. Stop the server before clearing them. Clearing caches can make a later explicit generation consume quota again. Local files are not production persistence, and existing local caches are not automatically imported into PostgreSQL.
+One Next.js App Router application uses strict TypeScript, Node.js route handlers, React/SVG, Tailwind CSS, KaTeX and Zod.
 
-## Checks
+| Responsibility | Implementation |
+| --- | --- |
+| Request interpretation and explanations | Groq interprets requests, selects an example when needed, and writes bounded qualitative explanations and a related practice equation. |
+| Mathematics | Application code normalizes BigInt rationals, derives valid operations, computes exact solutions and verifies substitution. A changed AI interpretation or incorrect structured answer is rejected. |
+| Whiteboard | Code compiles verified mathematics into trusted visual primitives and stable element IDs. The model does not supply executable HTML, JavaScript or SVG. |
+| Narration | Groq generates WAV speech for short teaching beats. Code supplies numerical spoken facts and validates audio and duration. |
+| Follow-ups | The server loads the selected lesson, recomputes trusted facts and validates bounded question/history context. AI replies are text-first, with optional static highlights. |
+| Persistence | PostgreSQL stores preparation status, plans, manifests, deduplicated audio and completed follow-up responses. File repositories support local development. |
+
+Domain logic lives in `src/domain/`; providers and persistence in `src/server/`; the learner interface in `src/components/`. Preparation advances through bounded requests and persists completed work between stages. Plans and responses are runtime-validated. Planning has at most two explicit validation attempts; safe retry feedback identifies the field and rule without exposing full provider output.
+
+## Voice and whiteboard synchronization
+
+Each live teaching beat has a separate narration clip. WAV sample frames determine its measured duration. Global playback time is the current clip's measured start plus the audio element's actual playback position; the renderer reconstructs board state from that timestamp.
+
+Pause freezes visual progress. Seeking backward removes later working and restores earlier or partially completed actions. Clip buffering preserves position, and playback begins only after a user gesture. Captions follow the active beat.
+
+Within-clip reveal and stroke offsets are **estimated choreography**, not verified word- or character-level alignment: Groq does not return that alignment object. All clips are prepared before playback, and lesson duration varies with their actual audio. There is no enforced two-minute duration.
+
+## Testing
+
+These checks use mocked providers and local audio/database fixtures, without spending provider credits:
 
 ```sh
 npm run build
@@ -156,43 +115,25 @@ npm run test
 npm run test:production
 ```
 
-A build generates Next.js type files needed by a fresh checkout. `test:production` starts isolated local ports and needs permission to bind them. It uses temporary embedded PostgreSQL over TCP, the real `pg` driver, fixture audio, fake credentials and an external-provider request blocker.
+Build first on a fresh checkout to generate Next.js type files. `test:production` runs an isolated `npm start` instance and temporary PostgreSQL-compatible server on local ports; it does not test the hosted Neon connection.
 
-For browser checks, install Chromium once, then run:
+For browser tests, install Chromium once and ensure the development port is free:
 
 ```sh
 npx playwright install chromium
 npm run test:e2e
 ```
 
-The full default suite uses the development server, including the development voice preview. To verify the learner flow against a production build:
+Unit/integration tests cover exact arithmetic, fraction notation, validation, retries, persistence, caching and deterministic state reconstruction. Browser tests use mocked lesson/answer responses and fixture audio to exercise playback, buffering, seeking, follow-ups, practice and desktop/mobile layouts. See [production-mode checks](docs/production.md#health-checks-and-verification) for the production browser command. Local tests do not establish that the hosted release or provider account is working.
 
-```sh
-PLAYWRIGHT_PRODUCTION=1 npm run test:e2e -- tests/browser/entry.spec.ts tests/browser/journey.spec.ts tests/browser/followup.spec.ts tests/browser/live.spec.ts tests/browser/clips.spec.ts
-```
+## Limitations and audio attribution
 
-Most recent verification: typecheck and production build passed; **102 unit/integration tests** passed; **16 desktop/mobile production browser journeys** passed; isolated production smoke checks passed. Browser data/audio are mocked fixtures. Checks exercised real local audio advancement, buffering, pause/resume, backward reconstruction, contextual reply restoration, stale responses and practice. A subsequent owner-requested Neon migration succeeded; real hosted concurrency and deployed end-to-end behaviour still require review. Automated tests do not spend provider quota.
+- Teaching is limited to the supported unique-solution linear equations; qualitative AI prose is constrained but not formally proved correct.
+- Follow-ups have no Listen action or animated operation demonstrations. Visible conversation history is page-local; refresh clears it.
+- Free-service quotas, cold starts and network failures can delay preparation. There are no app-imposed daily/session generation quotas, but provider rate limits, request pacing and storage safeguards remain.
+- Anonymous sessions are not an authentication system. Ambiguous external API failures cannot guarantee exactly-once generation; retry explicitly after checking usage.
+- The saved narration is an offline **Flite SLT development fixture**, with limited prosody, separate from live Groq speech. See [audio provenance](public/audio/PROVENANCE.md) and the retained [Flite license](public/audio/FLITE-LICENSE.txt). Its generation inputs and script are preserved for reproducibility.
 
-## Limitations and audio provenance
+## Deployment documentation
 
-- Scope remains bounded linear equations, with all narration prepared before playback.
-- Qualitative AI prose is constrained and grounded in verified facts, but is not a formal proof of natural-language correctness.
-- Follow-up answers are text-first; no Listen action or animated answer-operation demonstration is implemented.
-- Cookie-based demo limits are not an authentication system. External API calls and database commits cannot guarantee exactly-once execution after ambiguous failures.
-- Free quotas, cold starts and provider availability can interrupt preparation. A final live Vercel/Neon/Groq acceptance run is required after deployment.
-- The saved voice is an offline **Flite SLT development fixture**, not Groq narration or a production-quality voice. Its measured phrase boundaries and authored visual offsets are disclosed in [audio provenance](public/audio/PROVENANCE.md); the [Flite license](public/audio/FLITE-LICENSE.txt) is retained. No synthesizer binaries or voice models are distributed.
-- The latest recorded runtime dependency audit reported no vulnerabilities. Five existing development-tool advisories were recorded; review compatible tooling fixes before publication. No forced dependency downgrade is applied.
-
-## Publishing source
-
-Commit source, migrations, documentation, tests, the saved audio/license, `.env.example` and `package-lock.json`. `.gitignore` excludes real environment files, local credentials/tool configuration, dependencies, build artifacts, generated type files, database/audio caches and test reports.
-
-Before committing, inspect `git status --short` and `git diff --cached --stat`. Ignore rules do not remove files already tracked by Git; untrack any previously committed secret/artifact and rotate exposed credentials where necessary. Do not publish database dumps or real generated cache content.
-
-For an independent source-only copy outside this repository:
-
-```sh
-npm run package:source -- /absolute/path/to/an/empty/source-directory
-```
-
-The packaging script uses an allowlist and excludes dependencies, builds, runtime caches and secret environment files. Review the copy before publishing. Public deployment and assignment submission remain explicit owner actions.
+See [docs/production.md](docs/production.md) for Vercel Hobby setup, Neon migrations, health checks, provider limits, retention/pruning, troubleshooting and optional source packaging.

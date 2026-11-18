@@ -39,20 +39,22 @@ try{
  checkpoint='health check';const health=await fetch(base+'/api/health');assert.equal(health.status,200);assert.equal((await health.json()).storage,'postgresql');
  assert.equal((await fetch(base+'/dev/voice')).status,404);
  assert.equal((await fetch(base+'/api/voice-preview',{method:'POST',headers:{origin:base}})).status,403);
- checkpoint='anonymous lesson admission';let cookie='';
+ checkpoint='lesson creation without daily caps';let cookie='';
  async function create(topic){
   const r=await fetch(base+'/api/lessons',{method:'POST',headers:{origin:base,'Content-Type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify({topic})});
   if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];
   return r;
  }
  const created=await create('Help me solve 5x + 7 = 32');assert.equal(created.status,200);const job=await created.json();assert.equal(job.stage,'interpret');
- assert.ok(cookie.startsWith('tutor-demo='));
  assert.equal((await create('Help me solve 5x + 7 = 32')).status,200);
  assert.equal((await create('Help me solve 3x + 2 = 14')).status,200);
- assert.equal((await create('Help me solve 4x + 2 = 18')).status,429);
+ assert.equal((await create('Help me solve 4x + 2 = 18')).status,200);
+ for(let i=1;i<=7;i++)assert.equal((await create(`Help me solve ${i}x + 1 = 12`)).status,200);
  checkpoint='application restart';await stop();
  await start();
- assert.equal((await (await fetch(base+'/api/lessons/'+job.id)).json()).stage,'interpret');
+ const restored=await fetch(base+'/api/lessons/'+job.id);
+ assert.equal(restored.status,200,'Stored fixture lesson must remain available after restart');
+ assert.equal((await restored.json()).stage,'interpret');
  checkpoint='persisted fixture and clip delivery';
  // Seed one verified fixture beat without any speech/AI request.
  const wav=Buffer.alloc(44+16000);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(16000,40);
@@ -70,6 +72,6 @@ try{
  checkpoint='pruning';await command(['run','db:prune']);
  checkpoint='missing storage guard';await stop();await start({DATABASE_URL:''});
  assert.equal((await fetch(base+'/api/health')).status,503);assert.equal((await fetch(base)).status,200);
- console.log('PASS: npm start, explicit/idempotent migrations, real pg TCP, persistent requests/restart, session quotas, ready manifest, clip ranges, pruning, preview disabled, missing-config guard. Mocked audio only; no provider calls.');
-}catch{console.error('Production smoke check failed at '+checkpoint+'. No credentials or raw server/database errors are printed.');process.exitCode=1;}
+ console.log('PASS: npm start, explicit/idempotent migrations, real pg TCP, persistent requests/restart, no daily generation caps, ready manifest, clip ranges, pruning, preview disabled, missing-config guard. Mocked audio only; no provider calls.');
+}catch(error){if(error?.code==='ERR_ASSERTION')console.error('Fixture assertion:',error.message);console.error('Production smoke check failed at '+checkpoint+'. No credentials or raw server/database errors are printed.');process.exitCode=1;}
 finally{await stop();if(pool)await pool.end();await server.stop();await db.close();await rm(dir,{recursive:true,force:true});}

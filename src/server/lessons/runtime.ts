@@ -1,5 +1,6 @@
 import 'server-only';
-import { LessonService, lessonKey, type Job } from './service';
+import { LESSON_PIPELINE_VERSION } from '../../domain/teaching-contract';
+import { LessonService, type Job } from './service';
 import { FileRepository } from './store';
 import { lessonProvider } from './provider';
 import { getConfig, configurationProblems, SpeechError } from '../speech/config';
@@ -9,7 +10,7 @@ import { FileSpeechRepository } from '../speech/cache';
 import { PostgresLessonRepository, PostgresSpeechRepository } from '../db/repositories';
 import { checkDatabase } from '../db/client';
 import { ProductionGate } from '../db/leases';
-import { demoSession, sessionSecret } from '../demo';
+import { sessionSecret } from '../demo';
 import { jobSchema } from './records';
 const globals=globalThis as typeof globalThis & { tutorRuntime?:ReturnType<typeof createRuntime> };
 export const persistent=()=>!!process.env.DATABASE_URL;
@@ -19,9 +20,12 @@ function createRuntime(){
  const speech=new PreviewService(persistent()?new PostgresSpeechRepository():new FileSpeechRepository(),
   (text,c)=>generateSpeech(text,c,limitedFetch));
  const service=new LessonService(repo,lessonProvider(model,config.apiKey,limitedFetch),speech,config,model,true);
- return {service,repo,config,model};
+ return {service,repo,config,model,version:LESSON_PIPELINE_VERSION};
 }
-export function liveService(){return (globals.tutorRuntime??=createRuntime()).service;}
+export function liveService(){
+ if(globals.tutorRuntime?.version!==LESSON_PIPELINE_VERSION)globals.tutorRuntime=createRuntime();
+ return globals.tutorRuntime.service;
+}
 export async function limitedFetch(input:Parameters<typeof fetch>[0],init?:RequestInit){
  const r=await fetch(input,init);
  if(persistent()){
@@ -37,21 +41,16 @@ export async function limitedFetch(input:Parameters<typeof fetch>[0],init?:Reque
  return r;
 }
 export async function createLesson(topic:string){
- const service=liveService();
- if(persistent()){
-  const {model,config}=globals.tutorRuntime!;
-  await new ProductionGate().admitLesson(await demoSession(),lessonKey(topic,model,config));
- }
- return service.create(topic);
+ return liveService().create(topic);
 }
 export async function advanceLesson(id:string,retry:boolean){
  const service=liveService();if(!persistent())return service.advance(id);
- const session=await demoSession(),gate=new ProductionGate();await gate.hasAccess(session,id);
+ const gate=new ProductionGate();
  const job=await service.get(id);if(!job)throw new SpeechError('missing','Lesson expired. Submit the topic again or try the saved example.',404);
  if(['ready','clarify','unsupported'].includes(job.stage)||job.retryAt&&job.retryAt>Date.now())return job;
- const fingerprint=(j:Job)=>`${j.stage}:${j.clips.length}:${j.attempts}`;
+ const fingerprint=(j:Job)=>`${LESSON_PIPELINE_VERSION}:${j.config.promptVersion}:${j.stage}:${j.clips.length}:${j.attempts}`;
  const initial=fingerprint(job);
- const result=await gate.execute(`lesson:${id}:${initial}`,session,'stage',retry,async()=>{
+ const result=await gate.execute(`lesson:${id}:${initial}`,retry,async()=>{
   const latest=await service.get(id);if(!latest||fingerprint(latest)!==initial)return latest!;
   const next=await service.advance(id);
   if(next.message&&!['clarify','unsupported'].includes(next.stage))throw new SpeechError('preparation',next.message,next.retryAt?429:502,next.retryAt?Math.max(1,Math.ceil((next.retryAt-Date.now())/1000)):0);
